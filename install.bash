@@ -200,8 +200,8 @@ EOF
 
 # Cleanup
 
-rm -rf "$PACK_DIR/clones"
-rm -rf "$PREFIX_PATH/idris2-*/filepath-*"
-rm -rf "$PREFIX_PATH/idris2-*/toml-*"
+#rm -rf "$PACK_DIR/clones"
+#rm -rf "$PREFIX_PATH/idris2-*/filepath-*"
+#rm -rf "$PREFIX_PATH/idris2-*/toml-*"
 
 "$PACK_DIR/bin/pack" info
