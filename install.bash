@@ -62,8 +62,8 @@ mkdir "$PACK_DIR/db"
 git clone https://github.com/stefan-hoeck/idris2-pack-db.git "$PACK_DIR/clones/idris2-pack-db"
 cp "$PACK_DIR/clones/idris2-pack-db/collections/"* "$PACK_DIR/db"
 
-LATEST_DB="$(find "$PACK_DIR/db" -name 'nightly-*' | sort | tail -1)"
-PACKAGE_COLLECTION="$(basename -s .toml "$LATEST_DB")"
+LATEST_DB="/home/jan/.pack/db/nightly-230509.toml"
+PACKAGE_COLLECTION="nightly-230509"
 IDRIS2_COMMIT=$(sed -ne '/^\[idris2\]/,/^commit/{/^commit/s/commit *= *"\([a-f0-9]*\)"/\1/p;}' "$PACK_DIR/db/$PACKAGE_COLLECTION.toml")
 
 # Bootstrap the Idris compiler
