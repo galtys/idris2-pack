@@ -23,11 +23,13 @@ elif command -v scheme &>/dev/null; then
 	DETECTED_SCHEME=scheme
 elif command -v chez &>/dev/null; then
 	DETECTED_SCHEME=chez
+elif command -v racket &>/dev/null; then
+	DETECTED_SCHEME=racket
 else
 	DETECTED_SCHEME=''
 fi
 
-read -r -p "Enter the name of your chez scheme binary [$DETECTED_SCHEME]: " SCHEME
+read -r -p "Enter the name of your chez-scheme or racket binary [$DETECTED_SCHEME]: " SCHEME
 SCHEME=${SCHEME:-$DETECTED_SCHEME}
 
 # Verify that the necessary programs are installed
@@ -35,11 +37,13 @@ SCHEME=${SCHEME:-$DETECTED_SCHEME}
 if [ -z "$SCHEME" ]; then
 	echo 'scheme binary was not set'
 	exit 1
+else
+	echo "Using $SCHEME for code generation"
 fi
 
 if [ -d "$PACK_DIR" ]; then
 	echo "There is already a $PACK_DIR directory."
-	echo "Please remove it with 'rm -fr $PACK_DIR' and rerun this script."
+	echo "Please remove it with the 'pack uninstall' command and rerun this script."
 	exit 1
 fi
 
@@ -75,13 +79,71 @@ git checkout "$IDRIS2_COMMIT"
 PREFIX_PATH="$PACK_DIR/install/$IDRIS2_COMMIT/idris2"
 BOOT_PATH="$PACK_DIR/install/$IDRIS2_COMMIT/idris2/bin/idris2"
 
-make bootstrap PREFIX="$PREFIX_PATH" SCHEME="$SCHEME"
-make install PREFIX="$PREFIX_PATH"
+if [ "$SCHEME" = "racket" ]; then
+	CG="racket"
+	make bootstrap-racket PREFIX="$PREFIX_PATH"
+else
+	CG="chez"
+	make bootstrap PREFIX="$PREFIX_PATH" SCHEME="$SCHEME"
+fi
+
+export IDRIS2_CG="$CG"
+
+make install PREFIX="$PREFIX_PATH" IDRIS2_CG="$CG"
 make clean
-make all IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH"
-make install IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH"
-make install-with-src-libs IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH"
-make install-with-src-api IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH"
+make all IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH" IDRIS2_CG="$CG"
+make install IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH" IDRIS2_CG="$CG"
+make install-with-src-libs IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH" IDRIS2_CG="$CG"
+make install-with-src-api IDRIS2_BOOT="$BOOT_PATH" PREFIX="$PREFIX_PATH" IDRIS2_CG="$CG"
+popd
+
+# Install getopts
+
+GETOPTS_COMMIT=$(sed -ne '/^\[db.getopts\]/,/^commit/{/^commit/s/commit *= *"\([a-f0-9]*\)"/\1/p;}' "$PACK_DIR/db/$PACKAGE_COLLECTION.toml")
+git clone https://github.com/idris-community/idris2-getopts.git "$PACK_DIR/clones/idris2-getopts"
+pushd "$PACK_DIR/clones/idris2-getopts"
+git checkout "$GETOPTS_COMMIT"
+"$BOOT_PATH" --install getopts.ipkg
+popd
+
+# Install elab-util
+
+ELAB_UTIL_COMMIT=$(sed -ne '/^\[db.elab-util\]/,/^commit/{/^commit/s/commit *= *"\([a-f0-9]*\)"/\1/p;}' "$PACK_DIR/db/$PACKAGE_COLLECTION.toml")
+git clone https://github.com/stefan-hoeck/idris2-elab-util.git "$PACK_DIR/clones/idris2-elab-util"
+pushd "$PACK_DIR/clones/idris2-elab-util"
+git checkout "$ELAB_UTIL_COMMIT"
+"$BOOT_PATH" --install elab-util.ipkg
+popd
+
+# Install algebra
+
+ALGEBRA_COMMIT=$(sed -ne '/^\[db.algebra\]/,/^commit/{/^commit/s/commit *= *"\([a-f0-9]*\)"/\1/p;}' "$PACK_DIR/db/$PACKAGE_COLLECTION.toml")
+git clone https://github.com/stefan-hoeck/idris2-algebra.git "$PACK_DIR/clones/idris2-algebra"
+pushd "$PACK_DIR/clones/idris2-algebra"
+git checkout "$ALGEBRA_COMMIT"
+"$BOOT_PATH" --install algebra.ipkg
+popd
+
+# Install refined
+
+REFINED_COMMIT=$(sed -ne '/^\[db.refined\]/,/^commit/{/^commit/s/commit *= *"\([a-f0-9]*\)"/\1/p;}' "$PACK_DIR/db/$PACKAGE_COLLECTION.toml")
+git clone https://github.com/stefan-hoeck/idris2-refined.git "$PACK_DIR/clones/idris2-refined"
+pushd "$PACK_DIR/clones/idris2-refined"
+git checkout "$REFINED_COMMIT"
+"$BOOT_PATH" --install refined.ipkg
+popd
+
+# Install parser and parser-toml
+
+PARSER_COMMIT=$(sed -ne '/^\[db.parser\]/,/^commit/{/^commit/s/commit *= *"\([a-f0-9]*\)"/\1/p;}' "$PACK_DIR/db/$PACKAGE_COLLECTION.toml")
+git clone https://github.com/stefan-hoeck/idris2-parser.git "$PACK_DIR/clones/idris2-parser"
+pushd "$PACK_DIR/clones/idris2-parser"
+git checkout "$PARSER_COMMIT"
+"$BOOT_PATH" --install parser.ipkg
+popd
+
+pushd "$PACK_DIR/clones/idris2-parser/toml"
+"$BOOT_PATH" --install parser-toml.ipkg
 popd
 
 # Install filepath
@@ -91,15 +153,6 @@ git clone https://github.com/stefan-hoeck/idris2-filepath.git "$PACK_DIR/clones/
 pushd "$PACK_DIR/clones/idris2-filepath"
 git checkout "$FILEPATH_COMMIT"
 "$BOOT_PATH" --install filepath.ipkg
-popd
-
-# Install toml-idr
-
-TOML_COMMIT=$(sed -ne '/^\[db.toml\]/,/^commit/{/^commit/s/commit *= *"\([a-f0-9]*\)"/\1/p;}' "$PACK_DIR/db/$PACKAGE_COLLECTION.toml")
-git clone https://github.com/cuddlefishie/toml-idr "$PACK_DIR/clones/toml-idr"
-pushd "$PACK_DIR/clones/toml-idr"
-git checkout "$TOML_COMMIT"
-"$BOOT_PATH" --install toml.ipkg
 popd
 
 # Install pack
@@ -120,6 +173,7 @@ APPLICATION="\$($PACK_DIR/bin/pack app-path idris2)"
 export IDRIS2_PACKAGE_PATH="\$($PACK_DIR/bin/pack package-path)"
 export IDRIS2_LIBS="\$($PACK_DIR/bin/pack libs-path)"
 export IDRIS2_DATA="\$($PACK_DIR/bin/pack data-path)"
+export IDRIS2_CG="$CG"
 \$APPLICATION "\$@"
 EOF
 
@@ -152,7 +206,7 @@ safety-prompt = true
 
 # Must-have applications. These will be installed automatically
 # when using a new package collection.
-# apps       = [ "lsp" ]
+# apps       = [ "idris2-lsp" ]
 
 [idris2]
 
@@ -200,8 +254,12 @@ EOF
 
 # Cleanup
 
-#rm -rf "$PACK_DIR/clones"
-#rm -rf "$PREFIX_PATH/idris2-*/filepath-*"
-#rm -rf "$PREFIX_PATH/idris2-*/toml-*"
+rm -rf "$PACK_DIR/clones"
+rm -rf "$PREFIX_PATH/idris2-*/elab-util-*"
+rm -rf "$PREFIX_PATH/idris2-*/algebra-*"
+rm -rf "$PREFIX_PATH/idris2-*/getopts-*"
+rm -rf "$PREFIX_PATH/idris2-*/refined-*"
+rm -rf "$PREFIX_PATH/idris2-*/parser-*"
+rm -rf "$PREFIX_PATH/idris2-*/filepath-*"
 
 "$PACK_DIR/bin/pack" info

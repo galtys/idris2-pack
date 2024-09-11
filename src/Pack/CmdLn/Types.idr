@@ -54,6 +54,7 @@ data Cmd : Type where
   BuildDeps        : Cmd
   Typecheck        : Cmd
   Clean            : Cmd
+  CleanBuild       : Cmd
   Repl             : Cmd
   Exec             : Cmd
 
@@ -88,6 +89,9 @@ data Cmd : Type where
   Completion       : Cmd
   CompletionScript : Cmd
 
+  -- Uninstall
+  Uninstall        : Cmd
+
   -- Help
   PrintHelp        : Cmd
 
@@ -101,6 +105,7 @@ commands =
   , BuildDeps
   , Typecheck
   , Clean
+  , CleanBuild
   , Repl
   , Exec
   , Install
@@ -124,6 +129,7 @@ commands =
   , Fuzzy
   , Completion
   , CompletionScript
+  , Uninstall
   , PrintHelp
   ]
 
@@ -134,6 +140,7 @@ name Build            = "build"
 name BuildDeps        = "install-deps"
 name Typecheck        = "typecheck"
 name Clean            = "clean"
+name CleanBuild       = "cleanbuild"
 name Repl             = "repl"
 name Exec             = "exec"
 name Install          = "install"
@@ -157,6 +164,7 @@ name Query            = "query"
 name Fuzzy            = "fuzzy"
 name Completion       = "completion"
 name CompletionScript = "completion-script"
+name Uninstall        = "uninstall"
 name PrintHelp        = "help"
 
 ||| List pairing a command with its name used for parsing commands.
@@ -169,21 +177,28 @@ export
 cmdDesc : Cmd -> String
 cmdDesc Build            = """
   Build a local package given as an `.ipkg` file or package name.
+  When no package is given, try to find the only one in the current directory.
   This will also install the package's dependencies.
   """
 
 cmdDesc BuildDeps        = """
   Install the dependencies of a local package given as an `.ipkg` file
-  or package name.
+  or package name. When no package is given, try to find the only one
+  in the current directory.
   """
 
 cmdDesc Typecheck        = """
   Typecheck a local package given as an `.ipkg` file or package name.
+  When no package is given, try to find the only one in the current directory.
   """
 
 cmdDesc Clean            = """
-  Clean up a local package by invoking `idris2 --clean` on its
-  `.ipkg` file
+  Clean up a local package by removing its build directory.
+  When no package is given, try to find the only one in the current directory.
+  """
+
+cmdDesc CleanBuild       = """
+  Convenience combination of `clean` followed by `build`.
   """
 
 cmdDesc Repl             = """
@@ -223,6 +238,8 @@ cmdDesc RemoveApp        = "Uninstall the given applications."
 cmdDesc Run              = """
   Run an application from the package collection or a local `.ipkg`
   file passing it the given command line arguments.
+  When no package and no arguments are given, try to find the only one
+  in the current directory.
 
   Note: This will install remote apps before running them without
   generating an entry in `$PACK_DIR/bin`.
@@ -247,7 +264,7 @@ cmdDesc Test              = """
 
 cmdDesc New              = """
   Create a new package in the current directory
-  consisting of a source directory, default module and a .ipkg file.
+  consisting of a source directory, a default module, a skeleton test suite, a local pack.toml file and a .ipkg file.
   A git repository will also be initialized together with a
   suitable `.gitignore` file.
 
@@ -345,8 +362,10 @@ cmdDesc Query            = """
   for each found package:
 
     -d --dependencies : Prints the dependencies of each query result
+       --tree         : Prints a dependency tree of a queried package
+       --reverse-tree : Prints a tree of packages depending on a queried package
     -s --short-desc   : Prints the `brief` description from each package's
-                        `.ipkg` file.
+                        `.ipkg` file
     -l --long-desc    : Prints detailed description of each query result
   """
 
@@ -371,6 +390,11 @@ cmdDesc CompletionScript = """
   Prints a shell script, which can be used for BASH-like TAB-completion.
   See the installation instructions about how to enable TAB-completion
   for your shell.
+  """
+
+cmdDesc Uninstall        = """
+  Uninstalls pack.
+  Deletes the $PACK_DIR directory.
   """
 
 cmdDesc PrintHelp        = """
@@ -400,6 +424,7 @@ cmdInCommands Build            = %search
 cmdInCommands BuildDeps        = %search
 cmdInCommands Typecheck        = %search
 cmdInCommands Clean            = %search
+cmdInCommands CleanBuild       = %search
 cmdInCommands Repl             = %search
 cmdInCommands Exec             = %search
 cmdInCommands Install          = %search
@@ -423,4 +448,5 @@ cmdInCommands Query            = %search
 cmdInCommands Fuzzy            = %search
 cmdInCommands Completion       = %search
 cmdInCommands CompletionScript = %search
+cmdInCommands Uninstall        = %search
 cmdInCommands PrintHelp        = %search

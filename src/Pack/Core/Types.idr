@@ -34,12 +34,14 @@ quote v = "\"\{v}\""
 export
 relativeTo : (origin, target : Path Abs) -> Path Rel
 relativeTo (PAbs sx) (PAbs sy) = PRel $ go (sx <>> []) (sy <>> [])
-  where go : (o,t : List Body) -> SnocList Body
-        go [>]       t  = Lin <>< t
-        go xs        [] = Lin <>< xs $> ".."
-        go (x :: xs) (y :: ys) = case x == y of
-          True  => go xs ys
-          False => Lin <>< (((x :: xs) $> "..") ++ (y :: ys))
+
+  where
+    go : (o,t : List Body) -> SnocList Body
+    go [>]       t  = Lin <>< t
+    go xs        [] = Lin <>< xs $> ".."
+    go (x :: xs) (y :: ys) = case x == y of
+      True  => go xs ys
+      False => Lin <>< (((x :: xs) $> "..") ++ (y :: ys))
 
 ||| True if the given file path body ends on `.ipkg`
 export
@@ -80,14 +82,14 @@ export %inline
 Cast String (Path Rel) where
   cast = toRelPath
 
-infixl 5 <//>
+export infixl 5 <//>
 
 ||| More flexible version of `</>` (path concatenation).
 export %inline
 (<//>) : Cast a (Path Rel) => Path t -> a -> Path t
 p <//> v = p </> cast v
 
-infixl 5 //>
+export infixl 5 //>
 
 ||| More flexible version of `//>`
 ||| (appending a file path body to an absolute path)
@@ -95,7 +97,7 @@ export %inline
 (//>) : Cast a Body => Path t -> a -> Path t
 p //> v = p /> cast v
 
-infixl 8 <->
+export infixl 8 <->
 
 ||| Concatenate two file path bodies with a hyphen inbetween.
 export
@@ -653,8 +655,9 @@ printTOMLErr (WrongType path type) =
 ||| specify exactly where in a TOML structure things went wrong.
 export
 prefixKey : (key : String) -> Either TOMLErr a -> Either TOMLErr a
-prefixKey k = mapFst $ \case MissingKey p => MissingKey (k :: p)
-                             WrongType p t => WrongType (k :: p) t
+prefixKey k = mapFst $ \case
+  MissingKey p => MissingKey (k :: p)
+  WrongType p t => WrongType (k :: p) t
 
 ||| Errors that can occur when running pack programs.
 public export
@@ -732,10 +735,11 @@ data PackErr : Type where
 
   ||| The given core package (base, contrib, etc.)
   ||| is missing from the Idris installation.
-  MissingCorePackage :  (name    : PkgName)
-                     -> (version : PkgVersion)
-                     -> (commit  : Commit)
-                     -> PackErr
+  MissingCorePackage :
+       (name    : PkgName)
+    -> (version : PkgVersion)
+    -> (commit  : Commit)
+    -> PackErr
 
   ||| Unknown command line argument
   UnknownArg : (arg : String) -> PackErr
@@ -748,16 +752,17 @@ data PackErr : Type where
 
   ||| Trying to run zero or more than one local package
   ||| (or something that isn't a local package).
-  BuildMany : PackErr
+  BuildMany : List Body -> PackErr
 
   ||| Unknown pack command
   UnknownCommand : String -> (usage : String) -> PackErr
 
   ||| Unknown pack command
-  InvalidCmdArgs :  (cmd   : String)
-                 -> (args  : List String)
-                 -> (usage : String)
-                 -> PackErr
+  InvalidCmdArgs :
+       (cmd   : String)
+    -> (args  : List String)
+    -> (usage : String)
+    -> PackErr
 
   ||| Trying to clone a repository into an existing
   ||| directory.
@@ -767,7 +772,7 @@ data PackErr : Type where
   TOMLFile :  (file : File Abs) -> (err : TOMLErr) -> PackErr
 
   ||| Error in a toml file.
-  TOMLParse : (file : File Abs) -> (err : String) -> PackErr
+  TOMLParse : (err : String) -> PackErr
 
   ||| Number of failures when building packages.
   BuildFailures : Nat -> PackErr
@@ -881,8 +886,12 @@ printErr (InvalidCmdArgs cmd args usage) =
   \{usage}
   """
 
-printErr BuildMany =
-  "Can only build or typecheck a single Idris2 package given as an `.ipkg` file."
+printErr (BuildMany []) = "No local `.ipkg` files found."
+printErr (BuildMany fs@(_::_)) = """
+  Ambiguous `.ipkg` files:
+  \{joinBy "\n" $ ("- " ++) . interpolate <$> fs}
+  Please choose only one.
+  """
 
 printErr (NoFilePath s) = "Not a file path : \{s}"
 
@@ -894,7 +903,7 @@ printErr (DirExists path) = """
 printErr (TOMLFile file err) =
   "Error in file \{file}: \{printTOMLErr err}."
 
-printErr (TOMLParse file err) = "Error in file \{file}: \{err}."
+printErr (TOMLParse err) = err
 
 printErr (BuildFailures 1) = "1 package failed to build."
 

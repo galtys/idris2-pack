@@ -2,6 +2,7 @@ module Pack.Runner
 
 import Data.List.Quantifiers
 import Data.IORef
+import Data.SortedMap
 import Pack.CmdLn
 import Pack.CmdLn.Completion
 import Pack.Config
@@ -12,6 +13,7 @@ import Pack.Runner.Develop
 import Pack.Runner.Query
 import Pack.Runner.Install
 import Pack.Runner.New
+import Pack.Runner.Uninstall
 
 public export
 Command Cmd where
@@ -27,6 +29,7 @@ Command Cmd where
   defaultLevel BuildDeps        = Build
   defaultLevel Typecheck        = Build
   defaultLevel Clean            = Build
+  defaultLevel CleanBuild       = Build
   defaultLevel Exec             = Warning
   defaultLevel New              = Build
   defaultLevel Repl             = Warning
@@ -50,21 +53,23 @@ Command Cmd where
   defaultLevel Fuzzy            = Cache
   defaultLevel Completion       = Silence
   defaultLevel CompletionScript = Silence
+  defaultLevel Uninstall        = Info
   defaultLevel PrintHelp        = Silence
 
   desc = cmdDesc
 
-  ArgTypes Build            = [PkgOrIpkg]
-  ArgTypes BuildDeps        = [PkgOrIpkg]
-  ArgTypes Typecheck        = [PkgOrIpkg]
-  ArgTypes Clean            = [PkgOrIpkg]
+  ArgTypes Build            = [Maybe PkgOrIpkg]
+  ArgTypes BuildDeps        = [Maybe PkgOrIpkg]
+  ArgTypes Typecheck        = [Maybe PkgOrIpkg]
+  ArgTypes Clean            = [Maybe PkgOrIpkg]
+  ArgTypes CleanBuild       = [Maybe PkgOrIpkg]
   ArgTypes Repl             = [Maybe (File Abs)]
   ArgTypes Exec             = [File Abs, CmdArgList]
   ArgTypes Install          = [List PkgName]
   ArgTypes InstallApp       = [List PkgName]
   ArgTypes Remove           = [List PkgName]
   ArgTypes RemoveApp        = [List PkgName]
-  ArgTypes Run              = [PkgOrIpkg, CmdArgList]
+  ArgTypes Run              = [Maybe PkgOrIpkg, CmdArgList]
   ArgTypes Test             = [PkgName, CmdArgList]
   ArgTypes New              = [PkgType, Body]
   ArgTypes Update           = []
@@ -81,6 +86,7 @@ Command Cmd where
   ArgTypes Fuzzy            = [FuzzyQuery]
   ArgTypes Completion       = [String, String]
   ArgTypes CompletionScript = [String]
+  ArgTypes Uninstall        = []
   ArgTypes PrintHelp        = [Maybe Cmd]
 
   readCommand_ n = lookup n namesAndCommands
@@ -100,6 +106,7 @@ Command Cmd where
   readArgs BuildDeps        = %search
   readArgs Typecheck        = %search
   readArgs Clean            = %search
+  readArgs CleanBuild       = %search
   readArgs Repl             = %search
   readArgs Exec             = %search
   readArgs Install          = %search
@@ -123,6 +130,7 @@ Command Cmd where
   readArgs Fuzzy            = %search
   readArgs Completion       = %search
   readArgs CompletionScript = %search
+  readArgs Uninstall        = %search
   readArgs PrintHelp        = %search
 
 isFetch : Cmd -> Bool
@@ -133,43 +141,46 @@ isFetch _     = False
 export covering
 runCmd : HasIO io => EitherT PackErr io ()
 runCmd = do
-  pd       <- getPackDir
-  td       <- mkTmpDir
-  cd       <- CD <$> curDir
-  cache    <- emptyCache
-  (mc,cmd) <- getConfig Cmd
-  let fetch := isFetch (fst cmd)
-  linebuf  <- getLineBufferingCmd
-  finally (rmDir tmpDir) $ case cmd of
-    (Completion ** [a,b])     => env mc fetch >>= complete a b
-    (CompletionScript ** [f]) => putStrLn (completionScript f)
-    (Query  ** [MkQ m s])     => env mc fetch >>= query m s
-    (Fuzzy ** [MkFQ m s])     => idrisEnv mc fetch >>= fuzzy m s
-    (UpdateDB ** [])          => updateDB
-    (CollectGarbage ** [])    => env mc fetch >>= garbageCollector
-    (Run ** [Pkg p,args])     => idrisEnv mc fetch >>= execApp p args
-    (Run ** [Ipkg p,args])    => idrisEnv mc fetch >>= runIpkg p args
-    (Test ** [p,args])        => idrisEnv mc fetch >>= runTest p args
-    (Exec ** [p,args])        => idrisEnv mc fetch >>= exec p args
-    (Repl ** [p])             => idrisEnv mc fetch >>= idrisRepl p
-    (Build ** [p])            => idrisEnv mc fetch >>= build p
-    (BuildDeps ** [p])        => idrisEnv mc fetch >>= buildDeps p
-    (Typecheck ** [p])        => idrisEnv mc fetch >>= typecheck p
-    (Clean ** [p])            => idrisEnv mc fetch >>= clean p
-    (PrintHelp ** [c])        => putStrLn (usageDesc c)
-    (Install ** [ps])         => idrisEnv mc fetch >>= \e => installLibs ps
-    (Remove ** [ps])          => idrisEnv mc fetch >>= \e => removeLibs ps
-    (InstallApp ** [ps])      => idrisEnv mc fetch >>= \e => installApps ps
-    (RemoveApp ** [ps])       => idrisEnv mc fetch >>= \e => removeApps ps
-    (Update ** [])            => idrisEnv mc fetch >>= update
-    (Fetch ** [])             => idrisEnv mc fetch >>= \e => install []
-    (PackagePath ** [])       => env mc fetch >>= packagePathDirs >>= putStrLn
-    (LibsPath ** [])          => env mc fetch >>= packageLibDirs  >>= putStrLn
-    (DataPath ** [])          => env mc fetch >>= packageDataDirs >>= putStrLn
-    (AppPath ** [n])          => env mc fetch >>= appPath n
-    (Info ** [])              => env mc fetch >>= printInfo
-    (New ** [pty,p])          => idrisEnv mc fetch >>= new cd pty p
-    (Switch ** [db])          => do
-      env <- idrisEnv mc fetch
-      install []
-      writeCollection
+  pd <- getPackDir
+  withTmpDir $ do
+    cd       <- CD <$> curDir
+    cache    <- emptyCache
+    (mc,cmd) <- getConfig Cmd
+    let fetch := isFetch (fst cmd)
+    linebuf  <- getLineBufferingCmd
+    case cmd of
+      (Completion ** [a,b])     => env mc fetch >>= complete a b
+      (CompletionScript ** [f]) => putStrLn (completionScript f)
+      (Query  ** [MkQ m s])     => env mc fetch >>= query m s
+      (Fuzzy ** [MkFQ m s])     => idrisEnv mc fetch >>= fuzzy m s
+      (UpdateDB ** [])          => updateDB
+      (CollectGarbage ** [])    => env mc fetch >>= garbageCollector
+      (Run ** [p,args])         => idrisEnv mc fetch >>= runApp !(refinePkg p) args
+      (Test ** [p,args])        => idrisEnv mc fetch >>= runTest p args
+      (Exec ** [p,args])        => idrisEnv mc fetch >>= exec p args
+      (Repl ** [p])             => idrisEnv mc fetch >>= idrisRepl p
+      (Build ** [p])            => idrisEnv mc fetch >>= build !(refinePkg p)
+      (BuildDeps ** [p])        => idrisEnv mc fetch >>= buildDeps !(refinePkg p)
+      (Typecheck ** [p])        => idrisEnv mc fetch >>= typecheck !(refinePkg p)
+      (Clean ** [p])            => idrisEnv mc fetch >>= clean !(refinePkg p)
+      (CleanBuild ** [p])       => do p <- refinePkg p
+                                      e <- idrisEnv mc fetch
+                                      clean p e >> build p e
+      (PrintHelp ** [c])        => putStrLn (usageDesc c)
+      (Install ** [ps])         => idrisEnv mc fetch >>= \e => installLibs ps
+      (Remove ** [ps])          => idrisEnv mc fetch >>= \e => removeLibs ps
+      (InstallApp ** [ps])      => idrisEnv mc fetch >>= \e => installApps ps
+      (RemoveApp ** [ps])       => idrisEnv mc fetch >>= \e => removeApps ps
+      (Update ** [])            => idrisEnv mc fetch >>= update
+      (Fetch ** [])             => idrisEnv mc fetch >>= \e => install []
+      (PackagePath ** [])       => env mc fetch >>= packagePathDirs >>= putStrLn
+      (LibsPath ** [])          => env mc fetch >>= packageLibDirs  >>= putStrLn
+      (DataPath ** [])          => env mc fetch >>= packageDataDirs >>= putStrLn
+      (AppPath ** [n])          => env mc fetch >>= appPath n
+      (Info ** [])              => env mc fetch >>= printInfo
+      (New ** [pty,p])          => idrisEnv mc fetch >>= new cd pty p
+      (Switch ** [db])          => do
+        env <- idrisEnv mc fetch
+        install []
+        writeCollection
+      (Uninstall ** [])         => uninstallPack @{metaConfigToLogRef @{mc}}

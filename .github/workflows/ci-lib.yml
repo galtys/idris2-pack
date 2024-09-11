@@ -1,3 +1,4 @@
+---
 name: Build
 
 on:
@@ -12,90 +13,35 @@ on:
   schedule:
     - cron: '0 21 * * *'
 
+permissions: read-all
+
 defaults:
   run:
     shell: bash
 
 jobs:
-
-  toml:
-    name: Build toml-idr with Idris latest
-    runs-on: ubuntu-latest
-    container: snazzybucket/idris2api:latest
-    steps:
-      - name: Checkout toml-idr
-        uses: actions/checkout@v2
-        with:
-          repository: cuddlefishie/toml-idr
-      - name: Download already installed dependencies
-        uses: actions/download-artifact@master
-        with:
-          name: dependencies-for-latest
-          path: /root/.idris2/
-        continue-on-error: true
-      - name: Install toml-idr
-        run: make install
-      - name: Save installed lib
-        uses: actions/upload-artifact@master
-        with:
-          name: dependencies-for-latest
-          path: /root/.idris2/idris2-*/toml*
-          if-no-files-found: error
-
-  filepath:
-    name: Build filepath with Idris latest
-    runs-on: ubuntu-latest
-    container: snazzybucket/idris2api:latest
-    steps:
-      - name: Checkout filepath
-        uses: actions/checkout@v2
-        with:
-          repository: stefan-hoeck/idris2-filepath
-      - name: Download already installed dependencies
-        uses: actions/download-artifact@master
-        with:
-          name: dependencies-for-latest
-          path: /root/.idris2/
-        continue-on-error: true
-      - name: Install filepath
-        run: idris2 --install filepath.ipkg
-      - name: Save installed lib
-        uses: actions/upload-artifact@master
-        with:
-          name: dependencies-for-latest
-          path: /root/.idris2/idris2-*/filepath*
-          if-no-files-found: error
-
   build:
-    name: Build the lib with latest
-    needs:
-      - toml
-      - filepath
+    name: Build pack with Idris2 latest
     runs-on: ubuntu-latest
-    container: snazzybucket/idris2api:latest
+    env:
+      PACK_DIR: /root/.pack
+    strategy:
+      fail-fast: false
+    container: ghcr.io/stefan-hoeck/idris2-pack:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Download installed dependencies
-        uses: actions/download-artifact@master
-        with:
-          name: dependencies-for-latest
-          path: /root/.idris2/
-      - name: Install git
-        run: |
-          apt-get update
-          apt-get install --yes git
       - name: Build lib
-        run: idris2 --build pack.ipkg
+        run: pack typecheck pack.ipkg
       - name: Build admin
-        run: idris2 --build pack-admin.ipkg
+        run: pack typecheck pack-admin.ipkg
 
   micropack:
     name: Bootstrap with micropack
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Install scheme
         run: |
           sudo apt-get update
@@ -113,19 +59,65 @@ jobs:
           cd ../example2
           pack run chem-smiles-example-test -n 1000
 
+  micropack-racket:
+    name: Bootstrap with micropack-racket
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install scheme
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes racket libgmp3-dev nodejs
+      - name: Run installation script
+        run: |
+          make micropack-racket
+          echo "$HOME/.pack/bin" >> "$GITHUB_PATH"
+      - name: Install application
+        run: pack install graph
+      - name: Run examples
+        run: |
+          cd example1
+          pack run chem-formula-example-test -n 1000
+          cd ../example2
+          pack run chem-smiles-example-test -n 1000
+
   shellscript:
     name: Bootstrap with the shell script
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Install scheme
         run: |
           sudo apt-get update
           sudo apt-get install --yes chezscheme libgmp3-dev nodejs
       - name: Run installation script
         run: |
-          echo chezscheme | bash -c "$(curl -fsSL https://raw.githubusercontent.com/stefan-hoeck/idris2-pack/main/install.bash)"
+          echo chezscheme | bash -c ./install.bash
+          echo "$HOME/.pack/bin" >> "$GITHUB_PATH"
+      - name: Install application
+        run: pack install graph
+      - name: Run examples
+        run: |
+          cd example1
+          pack run chem-formula-example-test -n 1000
+          cd ../example2
+          pack run chem-smiles-example-test -n 1000
+
+  shellscript-racket:
+    name: Bootstrap with the shell script and racket
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install scheme
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes racket libgmp3-dev nodejs
+      - name: Run installation script
+        run: |
+          echo racket | bash -c ./install.bash
           echo "$HOME/.pack/bin" >> "$GITHUB_PATH"
       - name: Install application
         run: pack install graph

@@ -20,16 +20,14 @@ before you continue:
 * A Scheme compiler; either [Chez Scheme](https://cisco.github.io/ChezScheme/)
   (default), or Racket.
   If you install Chez Scheme from source files, building it locally,
-  make sure you run ./configure --threads to build multithreading support in.
+  make sure you run `./configure --threads` to build multithreading support in.
 
-  Note 1: Racket support has not yet been built into *pack*. This
-  is an open issue.
+  Note: On Apple Silicon, Chez Scheme works out-of-the-box as of version 10.0.0,
+  and `brew install chezscheme` should install the latest version. If for some
+  reason you cannot upgrade your Chez version, see the
+  [Apple M1 User](#apple-m1-user) appendix.
 
-  Note 2: For Apple M1 user, at the moment, the easiest way to get Chez Scheme
-  is to use its [Racket fork](https://github.com/racket/ChezScheme).
-  See the [Apple M1 User](#apple-m1-user) appendix for more info.
-
-* `bash`, `GNU make`, `sha256sum`, and `GMP`. On Linux, you probably
+* `bash`, `GNU make`, `gcc` or `clang`, `sha256sum`, and `GMP`. On Linux, you probably
   already have these. On macOS and major BSD flavours, you can install them
   using a package manager: for instance, on macOS, you can install with the
   `brew install coreutils gmp` and on OpenBSD, with the
@@ -95,6 +93,13 @@ the name of your Chez Scheme executable is `scheme`:
 make micropack SCHEME=scheme
 ```
 
+In order to use racket instead of chez scheme, run the
+following:
+
+```sh
+make micropack-racket
+```
+
 Wait a couple of seconds. If *micropack* starts writing non-stop
 to standard out, this means that bootstrapping of the Idris2
 compiler has successfully started. This will take a couple of
@@ -146,21 +151,21 @@ You can also add them to your `.zshrc` file.
 
 ## Apple M1 user
 
-A the moment, Chez Scheme is hard to build on M1 processors.
-The best option may be to build the
-[Racket fork](https://github.com/racket/ChezScheme)
-of Chez Scheme from source.
+Apple Silicon processors (M1, M2, etc.) are supported as of Chez Scheme 10.0.0,
+released on 2024-02-07, and `brew install chezscheme` should Just Work.
 
-1. Clone the repository: `git clone git@github.com:racket/ChezScheme.git`
-2. In the ChezScheme repository, run the following set of instruction
-   (as found on [this reddit thread](https://www.reddit.com/r/Idris/comments/pc5lib/success_building_native_idris2_on_an_m1_mac/)):
+If for some reason you cannot upgrade your Chez version, the easiest way to get
+an Apple Silicon compatible install is to use the
+[Racket fork of Chez](https://github.com/racket/ChezScheme).
+When configuring the Chez Scheme build, Idris2 requires threading support to be
+enabled, so make sure to pass the `--threads` flag to Chez's `./configure`.
 
-   ```sh
-   arch=tarm64osx
-   ./configure --pb
-   make ${arch}.bootquick
-   ./configure --threads
-   make
-   sudo make install
-   sudo chown $(whoami) ${arch}/petite.1 ${arch}/scheme.1
-   ```
+For example:
+
+```sh
+git clone 'https://github.com/racket/ChezScheme.git'
+cd ChezScheme
+./configure --threads
+make
+sudo make install
+```

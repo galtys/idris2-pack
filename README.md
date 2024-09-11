@@ -44,6 +44,17 @@ pack help
 In the following sections, we assume the `$PACK_DIR/bin` folder
 is on your path and you have installed
 pack as described under [installation](INSTALL.md).
+
+To create a new library project, type
+
+```sh
+pack new lib idris2-library
+```
+replacing `idris2-library` with the name of your library.
+This will create a new package in the current directory consisting of a source directory, a default module, a skeleton test suite, a local pack.toml file and a .ipkg file.
+A git repository will also be initialized together with a suitable `.gitignore` file.
+If you wish to create a new application project, replace `lib` with `app`.
+
 To install a library from the package collection, run
 
 ```sh
@@ -263,21 +274,26 @@ can be found in the `example1` subfolder, sets up
 two libraries plus a test suite for local development.
 A detailed description how it works can be found [here](example1/README.md).
 
-The second example in folder `example2` explain how to collaborate
-on several packages in parallel via GitHub. Details can be found
+The second example in the folder `example2` explains how to collaborate
+on several packages in parallel via git. Details can be found
 [here](example2/README.md).
 
-## Stuff still Missing
+> **Note**
+>
+> Please notice that if your application relies on the `IDRIS2_PACKAGE_PATH`
+> environment variable (for example, an alternative backend for Idris) or your
+> package uses a shared library or support files, set `packagePath` option to
+> `true` in an appropriate section for you package in a `pack.toml` (both local
+> and in the pack collection).
+> You can see an example of such usage [here](https://github.com/stefan-hoeck/idris2-pack-db/blob/bcc8dc61706c73361bb1e6e18dd1b0c5981f0e18/collections/HEAD.toml#L297).
+> Technical details can be found [here](https://github.com/stefan-hoeck/idris2-pack/issues/256#issuecomment-1689305587).
 
-There is a lot of functionality still missing. Here's a
-non-comprehensive list:
+## Uninstallation
 
-- [x] Support for local package collections
-- [x] Command for starting a REPL session
-- [x] Support for custom build directories
-- [x] Command for typechecking an Idris package
-- [x] Command for building a local Idris2 package
-- [x] Command for running an application
-- [x] Command for querying a data collection
-- [x] Command for listing current version of data collection
-- [x] Support for running tests
+If you would like to uninstall pack from your system, you can simply use the following command:
+
+```sh
+pack uninstall
+```
+
+This will delete the `$PACK_DIR` directory.

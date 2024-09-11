@@ -138,14 +138,16 @@ opts x "switch"           = prefixOnlyIfNonEmpty x . ("latest" ::)
 opts x "clean"            = prefixOnlyIfNonEmpty x <$> ipkgFiles
 opts x "typecheck"        = prefixOnlyIfNonEmpty x <$> ipkgFiles
 opts x "new"              = prefixOnlyIfNonEmpty x <$> pure packageTypes
+opts x "uninstall"        = pure Nil
 opts x "help"             = prefixOnlyIfNonEmpty x <$> pure commands
 
 -- options
-opts x _ = pure $ if (x `elem` optionFlags)
-                    -- `x` is already a known option => perform
-                    -- directory completion
-                    then Nil
-                    else prefixOnly x optionFlags
+opts x _ = pure $
+  if (x `elem` optionFlags)
+    -- `x` is already a known option => perform
+    -- directory completion
+    then Nil
+    else prefixOnly x optionFlags
 
 ||| Prints tab-completion options based on the last and second-to-last
 ||| command line argument.

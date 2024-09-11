@@ -3,7 +3,6 @@ module Pack.Runner.New
 import Data.List1
 import Data.Maybe
 import Data.String
-import Data.String.Extra
 import Idris.Package.Types
 import Pack.Config
 import Pack.Core
@@ -15,11 +14,10 @@ import Libraries.Text.PrettyPrint.Prettyprinter.Render.String
 
 %default total
 
-newPkgDesc : (name : Body) -> (mod : Body) -> (user: String) -> PkgDesc
+newPkgDesc : (name : Body) -> (mod : Body) -> (user: Maybe String) -> PkgDesc
 newPkgDesc name mod user =
   let modName := (nsAsModuleIdent $ mkNamespace "\{mod}", "")
-   in {
-        authors := Just user
+   in { authors := user
       , version := Just (MkPkgVersion (0 ::: [1, 0]))
       , mainmod := toMaybe (mod == "Main") modName
       , executable := toMaybe (mod == "Main") "\{name}"
@@ -27,10 +25,9 @@ newPkgDesc name mod user =
       , sourcedir := Just "src"
       } (initPkgDesc "\{name}")
 
-newTestPkgDesc : (name : Body) -> (user: String) -> PkgDesc
+newTestPkgDesc : (name : Body) -> (user: Maybe String) -> PkgDesc
 newTestPkgDesc name user =
-   {
-     authors    := Just user
+   { authors    := user
    , version    := Just (MkPkgVersion (0 ::: [1, 0]))
    , mainmod    := Just (nsAsModuleIdent $ mkNamespace "Main", "")
    , executable := Just "\{name}-test"
@@ -41,9 +38,11 @@ newTestPkgDesc name user =
 toModuleName : List Char -> List Char
 toModuleName [] = []
 toModuleName (h :: t) = toUpper h :: map adjHyphen t
-  where adjHyphen : Char -> Char
-        adjHyphen '-' = '_'
-        adjHyphen c   = c
+
+  where
+    adjHyphen : Char -> Char
+    adjHyphen '-' = '_'
+    adjHyphen c   = c
 
 -- Helper to capitalize the first letter of a Body
 -- and replace hyphens with underscores
@@ -110,16 +109,18 @@ gitIgnoreFile =
 
 ||| Create a new package at current location
 export covering
-new :  HasIO io
-    => (curdir : CurDir)
-    -> PkgType
-    -> (pkgName : Body)
-    -> IdrisEnv
-    -> EitherT PackErr io ()
+new :
+     {auto _ : HasIO io}
+  -> (curdir : CurDir)
+  -> PkgType
+  -> (pkgName : Body)
+  -> IdrisEnv
+  -> EitherT PackErr io ()
 new (CD curdir) pty pkgName e = do
     debug "Creating new \{pty} package named \{pkgName}..."
     debug "Getting author name from git config"
-    user <- trim <$> sysRun ["git", "config", "user.name"]
+    user <- Just <$> trim <$> sysRun ["git", "config", "user.name"]
+            `catchE` (const $ right Nothing)
     debug "Creating PkgDesc"
     let (mod, modFile) = getModFile pty pkgName
 
@@ -134,17 +135,20 @@ new (CD curdir) pty pkgName e = do
     mkDir (srcDir)
 
     debug "Initializing git repo"
-    eitherT (\err => warn "Git repo creation failed: \{printErr err}")
-            (\_ => write (pkgRootDir </> ".gitignore") gitIgnoreFile)
-            (sysAndLog Info ["git", "init", pkgRootDir])
+    eitherT
+      (\err => warn "Git repo creation failed: \{printErr err}")
+      (\_ => write (pkgRootDir </> ".gitignore") gitIgnoreFile)
+      (sysAndLog Info ["git", "init", pkgRootDir])
 
     debug "Writing ipkg file"
-    write (pkgRootDir  /> (pkgName <+> ".ipkg"))
-          (renderString (layoutUnbounded $ pretty ipkg) ++ "\n")
+    write
+      (pkgRootDir  /> (pkgName <+> ".ipkg"))
+      (renderString (layoutUnbounded $ pretty ipkg) ++ "\n")
 
     debug "Writing test.ipkg file"
-    write (testDir  </> "test.ipkg")
-          (renderString (layoutUnbounded $ pretty test) ++ "\n")
+    write
+      (testDir  </> "test.ipkg")
+      (renderString (layoutUnbounded $ pretty test) ++ "\n")
 
     debug "Writing test Main.idr file"
     write (testDir  </> "src" </> "Main.idr") testFile

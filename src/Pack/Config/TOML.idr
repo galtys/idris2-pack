@@ -7,57 +7,75 @@ import Pack.Config.Types
 import Pack.Core
 import Pack.Database
 
+import Text.TOML
+
 %default total
 
 export
 FromTOML Autoload where
   fromTOML dir v = case v of
-    VString "none"      => Right NoPkgs
-    VString "installed" => Right Installed
-    VString "autolibs"  => Right AutoLibs
-    _                   => AutoPkgs <$> fromTOML dir v
+    TStr "none"      => Right NoPkgs
+    TStr "installed" => Right Installed
+    TStr "autolibs"  => Right AutoLibs
+    _                => AutoPkgs <$> fromTOML dir v
 
 export
 FromTOML Codegen where
   fromTOML = tmap Types.fromString
 
+extractString : (errMsg : String) -> (v : TomlValue) -> Either TOMLErr String
+extractString _ (TStr s) = Right s
+extractString errMsg _ = Left $ WrongType [] errMsg
+
 export
 FromTOML RlwrapConfig where
-  fromTOML _ (VBoolean x)  = Right $ if x then UseRlwrap [] else DoNotUseRlwrap
-  fromTOML _ (VString str) = Right $ UseRlwrap [NoEscape str]
-  fromTOML _ (VArray xs)   = map (UseRlwrap . fromStrList) $ for xs $ \case
-                               VString s => Right s
-                               _         => Left $ WrongType [] "array of strings"
-  fromTOML _ _             = Left $ WrongType [] "boolean, string or array of strings"
+  fromTOML _ (TBool x)   = Right $ if x then UseRlwrap [] else DoNotUseRlwrap
+  fromTOML _ (TStr str)  = Right $ UseRlwrap [NoEscape str]
+  fromTOML _ (TArr _ xs) =
+    map (UseRlwrap . fromStrList) $
+      traverse (extractString "array of strings") (xs <>> [])
+  fromTOML _ _ = Left $ WrongType [] "boolean, string or array of strings"
+
+export
+FromTOML CmdArgList where
+  fromTOML _ (TStr str)  = Right $ [NoEscape str]
+  fromTOML _ (TArr _ xs) =
+    fromStrList <$>
+      traverse (extractString "array of strings") (xs <>> [])
+  fromTOML _ _ = Left $ WrongType [] "string or array of strings"
 
 export
 FromTOML UserConfig where
   fromTOML f v =
-      [| MkConfig (maybeValAt "collection" f v)
-                  (maybeValAt "idris2.url" f v)
-                  (maybeValAt "idris2.commit" f v)
-                  (maybeValAt "pack.url" f v)
-                  (maybeValAt "pack.commit" f v)
-                  (maybeValAt "idris2.scheme" f v)
-                  (maybeValAt "idris2.bootstrap" f v)
-                  (maybeValAt "install.safety-prompt" f v)
-                  (maybeValAt "install.gc-prompt" f v)
-                  (maybeValAt "install.warn-depends" f v)
-                  (maybeValAt "install.whitelist" f v)
-                  (maybeValAt "install.with-src" f v)
-                  (maybeValAt "install.with-docs" f v)
-                  (maybeValAt "install.use-katla" f v)
-                  (pure Nothing)
-                  (maybeValAt "idris2.repl.rlwrap" f v)
-                  (maybeValAt "install.libs" f v)
-                  (maybeValAt "install.apps" f v)
-                  (maybeValAt "idris2.repl.autoload" f v)
-                  (maybeValAt "custom" f v)
-                  (pure Nothing)
-                  (pure Nothing)
-                  (maybeValAt "idris2.codegen" f v)
-                  (pure Nothing)
-                  (maybeValAt "log" f v)
+      [| MkConfig
+          (maybeValAt "collection" f v)
+          (maybeValAt "idris2.url" f v)
+          (maybeValAt "idris2.commit" f v)
+          (toList <$> maybeValAt "idris2.commit" f v)
+          (maybeValAt "pack.url" f v)
+          (maybeValAt "pack.commit" f v)
+          (maybeValAt "idris2.scheme" f v)
+          (maybeValAt "idris2.bootstrap" f v)
+          (maybeValAt "install.safety-prompt" f v)
+          (maybeValAt "install.gc-prompt" f v)
+          (maybeValAt "install.warn-depends" f v)
+          (maybeValAt "admin.skip-tests" f v)
+          (maybeValAt "install.whitelist" f v)
+          (maybeValAt "install.with-src" f v)
+          (maybeValAt "install.with-docs" f v)
+          (maybeValAt "install.use-katla" f v)
+          (pure Nothing)
+          (maybeValAt "idris2.repl.rlwrap" f v)
+          (maybeValAt "idris2.extra-args" f v)
+          (maybeValAt "install.libs" f v)
+          (maybeValAt "install.apps" f v)
+          (maybeValAt "idris2.repl.autoload" f v)
+          (maybeValAt "custom" f v)
+          (pure Nothing)
+          (pure Nothing)
+          (maybeValAt "idris2.codegen" f v)
+          (pure Nothing)
+          (maybeValAt "log" f v)
       |]
 
 ||| Initial content of an auto-generated `PACK_DIR/user/pack.toml` file.
@@ -99,7 +117,7 @@ initToml scheme db = """
   # List of packages and apps with custom build hooks we trust to
   # be safe. This gives more fine grained control over package safety
   # than `safety-prompt`.
-  whitelist = [ "pack", "lsp" ]
+  whitelist = [ "pack", "idris2-lsp" ]
 
   # Must-have libraries. These will be installed automatically
   # when using a new package collection.
@@ -107,7 +125,7 @@ initToml scheme db = """
 
   # Must-have applications. These will be installed automatically
   # when using a new package collection.
-  # apps       = [ "lsp" ]
+  # apps       = [ "idris2-lsp" ]
 
   [pack]
 

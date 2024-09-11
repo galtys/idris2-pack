@@ -3,6 +3,7 @@ module Pack.Runner.Install
 import Core.FC
 import Data.IORef
 import Data.Maybe
+import Data.SortedMap
 import Idris.Package.Types
 import Pack.Config
 import Pack.Core
@@ -22,12 +23,13 @@ ipkgCodeGen desc = case e.config.codegen of
   Default => getCG (maybe [] (filter (not . null) . words . snd) desc.options)
   cg      => cg
 
-  where getCG : List String -> Codegen
-        getCG ("--cg"      :: cg :: _) = fromString cg
-        getCG ("--codegen" :: cg :: _) = fromString cg
-        getCG [_]                      = Default
-        getCG []                       = Default
-        getCG (h :: t)                 = getCG t
+  where
+    getCG : List String -> Codegen
+    getCG ("--cg"      :: cg :: _) = fromString cg
+    getCG ("--codegen" :: cg :: _) = fromString cg
+    getCG [_]                      = Default
+    getCG []                       = Default
+    getCG (h :: t)                 = getCG t
 
 coreGitDir : (e : Env) => Path Abs
 coreGitDir = gitTmpDir compiler
@@ -40,13 +42,24 @@ copyApp ra =
      mkDir dir
      sys ["cp", "-r", Escapable "\{buildPath ra.desc}/exec/" ++ NoEscape "*", dir]
 
-pthStr : PackDir => Bool -> String
-pthStr False = ""
-pthStr True = """
-  export IDRIS2_PACKAGE_PATH="$(\{packExec} package-path)"
-  export IDRIS2_LIBS="$(\{packExec} libs-path)"
-  export IDRIS2_DATA="$(\{packExec} data-path)"
+noAppError : (app : PkgName) -> List String
+noAppError app = lines $ """
+  [ fatal ] Package `\{app}` is not built or not installed in the current
+            environment. Maybe, it was installed with an older compiler version
+            or using a local `pack.toml` which is not available in the current
+            directory. Try to reinstall it with `pack install-app \{app}`.
   """
+
+pthStr : (c : Config) => PackDir => Bool -> String
+pthStr False = ""
+pthStr True =
+  let racket := if useRacket then "export \{schemeVar}" else ""
+   in """
+   export IDRIS2_PACKAGE_PATH="$(\{packExec} package-path)"
+   export IDRIS2_LIBS="$(\{packExec} libs-path)"
+   export IDRIS2_DATA="$(\{packExec} data-path)"
+   \{racket}
+   """
 
 -- When linking to a binary from pack's `bin` directory,
 -- we distinguish between applications,
@@ -55,14 +68,15 @@ pthStr True = """
 -- where we first set the `IDRIS2_PACKAGE_PATH` variable
 -- before invoking the binary. For both cases, we let pack
 -- decide which version to use.
-appLink :  HasIO io
-        => (e: Env)
-        => PackDir
-        => (exec        : Body)
-        -> (app         : PkgName)
-        -> (withPkgPath : Bool)
-        -> (codeGen     : Codegen)
-        -> EitherT PackErr io ()
+appLink :
+     {auto _ : HasIO io}
+  -> {auto e : Env}
+  -> {auto _ : PackDir}
+  -> (exec        : Body)
+  -> (app         : PkgName)
+  -> (withPkgPath : Bool)
+  -> (codeGen     : Codegen)
+  -> EitherT PackErr io ()
 appLink exec app withPkgPath cg =
   let
       interp  := case cg of
@@ -72,7 +86,10 @@ appLink exec app withPkgPath cg =
       content := """
       #!/bin/sh
 
-      APPLICATION="$(\{packExec} app-path \{app})"
+      if ! APPLICATION="$(\{packExec} app-path \{app})" || [ ! -r "$APPLICATION" ]; then {
+      \{unlines $ noAppError app <&> \s => "  echo '\{s}'"}
+        } >&2; exit 2
+      fi
       \{pthStr withPkgPath}
 
       \{interp}$APPLICATION "$@"
@@ -110,14 +127,15 @@ dependsMsg p = """
 ||| Use the installed Idris to run an operation on
 ||| a library `.ipkg` file.
 export covering
-libPkg :  HasIO io
-       => (e : IdrisEnv)
-       => (env        : List (String,String))
-       -> (logLevel   : LogLevel)
-       -> (cleanBuild : Bool)
-       -> (cmd        : CmdArgList)
-       -> (desc       : Desc Safe)
-       -> EitherT PackErr io ()
+libPkg :
+     {auto _     : HasIO io}
+  -> {auto e     : IdrisEnv}
+  -> (env        : List (String,String))
+  -> (logLevel   : LogLevel)
+  -> (cleanBuild : Bool)
+  -> (cmd        : CmdArgList)
+  -> (desc       : Desc Safe)
+  -> EitherT PackErr io ()
 libPkg env lvl cleanBuild cmd desc =
   let exe := idrisWithCG
       s   := exe ++ cmd ++ [desc.path.file]
@@ -152,6 +170,19 @@ getTTCVersion = do
         Nothing => warn "Failed to parse TTC version \{str}" $> TTCV Nothing
     False => debug "No TTC version given by Idris" $> TTCV Nothing
 
+-- Tries to build Idris from an existing version of the compiler.
+tryDirectBuild : HasIO io => Env => io (Either PackErr ())
+tryDirectBuild =
+  runEitherT $
+    sysAndLog Build ["make", "support", prefixVar, schemeVar] >>
+    sysAndLog Build ["make", "idris2-exec", prefixVar, schemeVar]
+
+idrisCleanup : HasIO io => Env => io ()
+idrisCleanup =
+  ignore $ runEitherT $ do
+    sysAndLog Build ["make", "clean-libs"]
+    sysAndLog Build ["rm", "-r", "build/ttc", "build/exec"]
+
 ||| Builds and installs the Idris commit given in the environment.
 export covering
 mkIdris : HasIO io => (e : Env) => EitherT PackErr io IdrisEnv
@@ -162,15 +193,20 @@ mkIdris = do
     withCoreGit $ \dir => do
       case e.config.bootstrap of
         True  =>
-          sysAndLog Build ["make", "bootstrap", prefixVar, schemeVar]
+          sysAndLog Build ["make", bootstrapCmd, prefixVar, schemeVar]
         False =>
-          sysAndLog Build ["make", "support", prefixVar, schemeVar] >>
-          sysAndLog Build ["make", "idris2-exec", prefixVar, schemeVar]
+          -- if building with an existing installation fails for whatever reason
+          -- we revert to bootstrapping
+          tryDirectBuild >>= \case
+            Left x => do
+              warn "Building Idris failed. Trying to bootstrap now."
+              idrisCleanup
+              sysAndLog Build ["make", bootstrapCmd, prefixVar, schemeVar]
+            Right () => pure ()
 
       sysAndLog Build ["make", "install-support", prefixVar]
       sysAndLog Build ["make", "install-idris2", prefixVar]
-      sysAndLog Build ["make", "clean-libs"]
-      sysAndLog Build ["rm", "-r", "build/ttc", "build/exec"]
+      idrisCleanup
       cacheCoreIpkgFiles dir
 
   appLink "idris2" "idris2" True Default
@@ -187,8 +223,8 @@ withSrcStr = case c.withSrc of
   False => ""
 
 installImpl :
-     HasIO io
-  => {auto e : IdrisEnv}
+     {auto _ : HasIO io}
+  -> {auto e : IdrisEnv}
   -> (dir : Path Abs)
   -> SafeLib
   -> EitherT PackErr io ()
@@ -200,14 +236,15 @@ installImpl dir rl =
      when (isInstalled rl) $ do
        info "Removing currently installed version of \{name rl}"
        rmDir (pkgInstallDir rl.name rl.pkg rl.desc)
+       rmDir (pkgLibDir rl.name rl.pkg)
      libPkg pre Build True ["--build"] rl.desc
      libPkg pre Debug False instCmd rl.desc
      when !(exists $ dir /> "lib") $
        copyDir (dir /> "lib") (pkgLibDir rl.name rl.pkg)
 
 preInstall :
-     HasIO io
-  => {auto e : IdrisEnv}
+     {auto _ : HasIO io}
+  -> {auto e : IdrisEnv}
   -> SafeLib
   -> EitherT PackErr io ()
 preInstall rl = withPkgEnv rl.name rl.pkg $ \dir =>
@@ -228,8 +265,8 @@ preInstall rl = withPkgEnv rl.name rl.pkg $ \dir =>
 
 -- Install the given resolved library.
 installLib :
-     HasIO io
-  => {auto e : IdrisEnv}
+     {auto _ : HasIO io}
+  -> {auto e : IdrisEnv}
   -> SafeLib
   -> EitherT PackErr io ()
 installLib rl = case rl.status of
@@ -252,8 +289,8 @@ installLib rl = case rl.status of
 -- TODO: Install wrapper script only if necessary
 covering
 installApp :
-     HasIO io
-  => {auto e : IdrisEnv}
+     {auto _ : HasIO io}
+  -> {auto e : IdrisEnv}
   -> (withWrapperScript : Bool)
   -> SafeApp
   -> EitherT PackErr io ()
@@ -288,8 +325,8 @@ installApp b ra =
 covering
 -- Install the API docs for the given resolved library.
 installDocs :
-     HasIO io
-  => {auto e : IdrisEnv}
+     {auto _ : HasIO io}
+  -> {auto e : IdrisEnv}
   -> SafeLib
   -> EitherT PackErr io ()
 installDocs rl = case rl.status of
@@ -320,7 +357,7 @@ installDocs rl = case rl.status of
          in sysAndLog Build [katla, "html", src, ttm, NoEscape ">", srcHtml] >>
             insertSources ds
 
-    let docs := pkgDocs rl.name rl.pkg
+    let docs := pkgDocs rl.name rl.pkg rl.desc
     when !(exists docs) (rmDir docs)
     copyDir docsDir docs
     uncacheLib (name rl)
@@ -347,8 +384,8 @@ appInfo = mapMaybe $ \case App _ ra => Just "\{ra.name}"
 ||| all dependencies of the lot.
 export covering
 install :
-     HasIO io
-  => {auto e : IdrisEnv}
+     {auto _ : HasIO io}
+  -> {auto e : IdrisEnv}
   -> List (InstallType, PkgName)
   -> EitherT PackErr io ()
 install ps = do
@@ -379,22 +416,24 @@ installApps = install . map (App True,)
 ||| Install the (possibly transitive) dependencies of the given
 ||| loaded `.ipkg` file.
 export covering
-installDeps :  HasIO io
-            => IdrisEnv
-            => Desc Safe
-            -> EitherT PackErr io ()
+installDeps :
+     {auto _ : HasIO io}
+  -> {auto _ : IdrisEnv}
+  -> Desc Safe
+  -> EitherT PackErr io ()
 installDeps = install . map (Library,) . dependencies
 
 ||| Creates a packaging environment with Idris2 installed.
 export covering
-idrisEnv :  HasIO io
-         => PackDir
-         => TmpDir
-         => LibCache
-         => LineBufferingCmd
-         => MetaConfig
-         -> (fetch : Bool)
-         -> EitherT PackErr io IdrisEnv
+idrisEnv :
+     {auto _ : HasIO io}
+  -> {auto _ : PackDir}
+  -> {auto _ : TmpDir}
+  -> {auto _ : LibCache}
+  -> {auto _ : LineBufferingCmd}
+  -> MetaConfig
+  -> (fetch : Bool)
+  -> EitherT PackErr io IdrisEnv
 idrisEnv mc fetch = env mc fetch >>= (\e => mkIdris)
 
 ||| Update the pack installation
@@ -438,8 +477,10 @@ removeLib : HasIO io => Env => PkgName -> EitherT PackErr io ()
 removeLib n = do
   rl <- resolveLib n
   case isInstalled rl of
-    True  => info "Removing library \{n}" >>
-             rmDir (pkgInstallDir rl.name rl.pkg rl.desc)
+    True  => do
+      info "Removing library \{n}"
+      rmDir (pkgInstallDir rl.name rl.pkg rl.desc)
+      rmDir (pkgLibDir rl.name rl.pkg)
     False => warn "Package \{n} is not installed. Ignoring."
 
 ||| Remove the given libs or apps
